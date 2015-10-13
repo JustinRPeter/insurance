@@ -103,142 +103,225 @@ getGeoDetails <- function(address){
    return(answer)
 }
  
-#initialise a dataframe to hold the results
-#geocoded <- data.frame()
-geocoded <- vector("list",length=length(ins_data))
-# find out where to start in the address list (if the script was interrupted
-# before):
-startfile  <- 1
-startindex <- 1
-#if a temp file exists - load it up and count the rows!
-#tempfilename <- paste0(infile, '_temp_geocoded.rds')
-tempfilename <- vector("character",length=length(ins_data))
-#for (i in seq_along(ins_data)){
-#    tempfilename[i] <- paste0(infiles[i], '_temp_geocoded.rds')
-#        if (file.exists(tempfilename[i])){
-#               print("Found temp file - resuming from index:")
-#               geocoded[[i]] <- readRDS(tempfilename[i])
-#               startindex <- nrow(geocoded[[i]])
-#               print(startindex)
-#        }
-#}
 
-# Construct a temporary file name for each R data file.
+# Read the geocoded files from the final output directory to determine
+# which file we have start from
+gcdfiles <- list.files(indir, '*geocoded.rds*')
 
-# if a temp file exists - load it up and count the rows.
-# (1) construct a vector of the temp file names
-# (2) Find the one which was modified most recently
-# (3) Also need to add conditions in case no files have 
-#     been processed.
-tempfilename <- paste0(infiles,"_temp_geocoded.rds")
-# Find the file which was modified most recently 
-tempfileinfo   <- file.info(tempfilename)
-lastfilemodind <- which.max(tempfileinfo$mtime)
-#tempfileorder  <- sort(tempfileinfo$mtime,decreasing=TRUE)
-#lastfilemod    <- tempfileorder[1]
-lastfilemod <- tempfilename[lastfilemodind]
+if (length(gcdfiles) == 0){startfile <- 1} else {startfile <- length(gcdfiles)+1}
 
-        #if (file.exists(tempfilename[i])){
-#if ( (length(lastfilemod) > 0) & (file.exists(lastfilemod)) ){
-if (length(lastfilemod) > 0){ # check at least one file already processed
-    if (file.exists(lastfilemod)){
-    print("Found temp file - resuming from index:")
-    #geocoded[[i]] <- readRDS(lastfilemod)
-    geocoded[[lastfilemodind]] <- readRDS(lastfilemod)
-    startindex <- nrow(geocoded[[lastfilemodind]])
-    startfile  <- infiles[lastfilemodind]
-    print(startindex)
-    print(startfile)
+
+# Start the geocoding process - 
+# file by file and address by address. geocode() function takes
+# care of query speed limit.
+#for (filindx in seq_along(ins_data)){
+for (filindx in startfile:length(ins_data)){
+#for (filindx in seq(startfile:startfile+1)){
+
+    #Only work on files which have more than one line
+    #if (length(addresses[[filindx]]) > 1){
+
+    print(paste("Working on file: ", basename(infiles[filindx]), 
+                  filindx, " of ", length(infiles),sep=" "))
+
+    startindex   <- 1
+    geocoded <- data.frame()
+    tempfilename <- paste0(basename(infiles[filindx]), '_temp_geocoded.rds')
+    if (file.exists(tempfilename)){
+        print("Found temp file - resuming from index:")
+        #geocoded[[filindx]] <- readRDS(tempfilename)
+        geocoded <- readRDS(tempfilename)
+        #startindex <- nrow(geocoded[[filindx]])
+        startindex <- nrow(geocoded)
+        print(startindex)
     }
-}
-
-#}
-
 
 # Start the geocoding process - address by address. geocode() function takes
 # care of query speed limit.
-for (filindx in seq_along(ins_data)){
+    for (ii in seq(startindex, length(addresses[[filindx]]))){
+       print(paste("Working on index", ii, "of", length(addresses[[filindx]])))
+       #query the google geocoder - this will pause here if we are over the limit.
+       result = getGeoDetails(addresses[[filindx]][ii]) 
+       print(result$status)     
+       result$index <- ii
+       #append the answer to the results file.
+       geocoded <- rbind(geocoded, result)
+       #save temporary results as we are going along
+       saveRDS(geocoded, tempfilename)
+       # Remove the tempfile if no longer needed
+       if (length(geocoded$formatted_address) >= 
+           length(addresses[[filindx]])){
+           unlink(tempfilename)
+       }
+    
+    }
+    # Now add the latitude and longitude to the extracted data set
+    if (length(sub_ins_data[[filindx]]$Incurred.To.Date) > 0){
+        sub_ins_data[[filindx]]$lat      <- geocoded$lat
+        sub_ins_data[[filindx]]$long     <- geocoded$long
+        sub_ins_data[[filindx]]$accuracy <- geocoded$accuracy
+        saveRDS(sub_ins_data[[filindx]],
+                paste0(infiles[filindx],"_geocoded.rds"))
+        write.table(sub_ins_data[[filindx]],
+                    paste0(infiles[filindx],"_geocoded.csv"),
+                    sep=",",row.names=FALSE)
+    } else { #Just write a dummy file
+        saveRDS(sub_ins_data[[filindx]],
+                paste0(infiles[filindx],"_geocoded.rds"))
+        write.table(sub_ins_data[[filindx]],
+                paste0(infiles[filindx],"_geocoded.rds"),
+                sep=",",row.names=FALSE)
 
-    #Only work on files which have more than one line
-    if (length(addresses[[filindx]]) > 1){
-
-        print(paste0("Working on file: ", filindx, basename(infiles[filindx])))
-
-        startindex   <- 1
-        tempfilename <- paste0(infiles[filindx], '_temp_geocoded.rds')
-        if (file.exists(tempfilename)){
-            print("Found temp file - resuming from index:")
-            #geocoded[[filindx]] <- readRDS(tempfilename)
-            geocoded <- readRDS(tempfilename)
-            #startindex <- nrow(geocoded[[filindx]])
-            startindex <- nrow(geocoded)
-            print(startindex)
-        }
-
-        for (ii in seq(startindex,length(addresses[[filindx]]))){
-            print(paste("Working on index", ii, "of", length(addresses[[filindx]])))
-            result = getGeoDetails(addresses[[filindx]])
-            print(result$status)
-            result$index <- ii
-            #geocoded[[filindx]] <- rbind(geocoded[[filindx]], result)
-            geocoded <- rbind(geocoded, result)
-            saveRDS(geocoded,tempfilename)
-        }
     }
 }
 
+## now we add the latitude and longitude to the main data
+#data$lat <- geocoded$lat
+#data$long <- geocoded$long
+#data$accuracy <- geocoded$accuracy
+# 
+##finally write it all to the output files
+##saveRDS(data, paste0("../data/", infile ,"_geocoded.rds"))
+#saveRDS(data, paste0("../data/insurance2/", infile ,"_geocoded.rds"))
+#write.table(data, file=paste0("../data/insurance2/", infile ,"_geocoded.csv"), sep=",",
+#row.names=FALSE)
+#
 
 
 
 
 
-    # If no files have been read, start with the first file
-    #if (ii == 1){
-    # Check to see if a tempdata file exists
-    # If it does read it
-    #if (file.exists(tempfilename[ii])){
-        geocoded[[ii]] <- readRDS(tempfilename[ii])
-        # Check the number of rows
-        startindex <- nrows(geocoded[[ii]])
-        # If it doesn't equal the no. of rows in the file
-        # continue from where we left off.
-        if (startindex != length(addresses[[ii]])) {
-            for (jj in seq(startindex, length(addresses[[ii]]))){
-                print(paste("Working on index", jj, "of", length(addresses[[ii]])))
-                print(paste("Processing file", basename(infiles[ii])))
-                #query the google geocoder - this will pause here if we are over the limit.
-                result = getGeoDetails(addresses[[ii]][jj]) 
-                print(result$status)     
-                result$index <- jj
-                #append the answer to the results file.
-                geocoded[[ii]] <- rbind(geocoded[[ii]], result)
-                #save temporary results as we are going along
-                saveRDS(geocoded[[ii]], tempfilename[ii])
-            }
-        }
-    #}
-}
+##initialise a dataframe to hold the results
+##geocoded <- data.frame()
+#geocoded <- vector("list",length=length(ins_data))
+## find out where to start in the address list (if the script was interrupted
+## before):
+#startfile  <- 1
+#startindex <- 1
+##if a temp file exists - load it up and count the rows!
+##tempfilename <- paste0(infile, '_temp_geocoded.rds')
+#tempfilename <- vector("character",length=length(ins_data))
+##for (i in seq_along(ins_data)){
+##    tempfilename[i] <- paste0(infiles[i], '_temp_geocoded.rds')
+##        if (file.exists(tempfilename[i])){
+##               print("Found temp file - resuming from index:")
+##               geocoded[[i]] <- readRDS(tempfilename[i])
+##               startindex <- nrow(geocoded[[i]])
+##               print(startindex)
+##        }
+##}
+#
+## Construct a temporary file name for each R data file.
+#
+## if a temp file exists - load it up and count the rows.
+## (1) construct a vector of the temp file names
+## (2) Find the one which was modified most recently
+## (3) Also need to add conditions in case no files have 
+##     been processed.
+#tempfilename <- paste0(infiles,"_temp_geocoded.rds")
+## Find the file which was modified most recently 
+#tempfileinfo   <- file.info(tempfilename)
+#lastfilemodind <- which.max(tempfileinfo$mtime)
+##tempfileorder  <- sort(tempfileinfo$mtime,decreasing=TRUE)
+##lastfilemod    <- tempfileorder[1]
+#lastfilemod <- tempfilename[lastfilemodind]
+#
+#        #if (file.exists(tempfilename[i])){
+##if ( (length(lastfilemod) > 0) & (file.exists(lastfilemod)) ){
+#if (length(lastfilemod) > 0){ # check at least one file already processed
+#    if (file.exists(lastfilemod)){
+#    print("Found temp file - resuming from index:")
+#    #geocoded[[i]] <- readRDS(lastfilemod)
+#    geocoded[[lastfilemodind]] <- readRDS(lastfilemod)
+#    startindex <- nrow(geocoded[[lastfilemodind]])
+#    startfile  <- infiles[lastfilemodind]
+#    print(startindex)
+#    print(startfile)
+#    }
+#}
 
-            
+#}
 
-#for (ii in lastfilemodind:length(ins_data)){
-    # Only process a file if there is something in it. 
-    if (length(addresses[[ii]]) > 1){
-        for (jj in seq(startindex, length(addresses[[ii]]))){
-           print(paste("Working on index", jj, "of", length(addresses[[ii]])))
-           print(paste("Processing file", basename(infiles[ii])))
-           #query the google geocoder - this will pause here if we are over the limit.
-           result = getGeoDetails(addresses[[ii]][jj]) 
-           print(result$status)     
-           result$index <- jj
-           #append the answer to the results file.
-           geocoded[[ii]] <- rbind(geocoded[[ii]], result)
-           #save temporary results as we are going along
-           saveRDS(geocoded[[ii]], tempfilename[ii])
-        } 
-    }
-}
- 
+##initialise a dataframe to hold the results
+#geocoded <- data.frame()
+## find out where to start in the address list (if the script was interrupted
+## before):
+#startindex <- 1
+##if a temp file exists - load it up and count the rows!
+#tempfilename <- paste0(infile, '_temp_geocoded.rds')
+#if (file.exists(tempfilename)){
+#    print("Found temp file - resuming from index:")
+#    geocoded <- readRDS(tempfilename)
+#    startindex <- nrow(geocoded)
+#    print(startindex)
+#}
+
+
+#
+#        for (ii in seq(startindex,length(addresses[[filindx]]))){
+#            print(paste("Working on index", ii, "of", length(addresses[[filindx]])))
+#            result = getGeoDetails(addresses[[filindx]])
+#            print(result$status)
+#            result$index <- ii
+#            #geocoded[[filindx]] <- rbind(geocoded[[filindx]], result)
+#            geocoded <- rbind(geocoded, result)
+#            saveRDS(geocoded,tempfilename)
+#        }
+#    }
+#}
+
+
+
+
+
+
+#    # If no files have been read, start with the first file
+#    #if (ii == 1){
+#    # Check to see if a tempdata file exists
+#    # If it does read it
+#    #if (file.exists(tempfilename[ii])){
+#        geocoded[[ii]] <- readRDS(tempfilename[ii])
+#        # Check the number of rows
+#        startindex <- nrows(geocoded[[ii]])
+#        # If it doesn't equal the no. of rows in the file
+#        # continue from where we left off.
+#        if (startindex != length(addresses[[ii]])) {
+#            for (jj in seq(startindex, length(addresses[[ii]]))){
+#                print(paste("Working on index", jj, "of", length(addresses[[ii]])))
+#                print(paste("Processing file", basename(infiles[ii])))
+#                #query the google geocoder - this will pause here if we are over the limit.
+#                result = getGeoDetails(addresses[[ii]][jj]) 
+#                print(result$status)     
+#                result$index <- jj
+#                #append the answer to the results file.
+#                geocoded[[ii]] <- rbind(geocoded[[ii]], result)
+#                #save temporary results as we are going along
+#                saveRDS(geocoded[[ii]], tempfilename[ii])
+#            }
+#        }
+#    #}
+#}
+#
+#            
+#
+##for (ii in lastfilemodind:length(ins_data)){
+#    # Only process a file if there is something in it. 
+#    if (length(addresses[[ii]]) > 1){
+#        for (jj in seq(startindex, length(addresses[[ii]]))){
+#           print(paste("Working on index", jj, "of", length(addresses[[ii]])))
+#           print(paste("Processing file", basename(infiles[ii])))
+#           #query the google geocoder - this will pause here if we are over the limit.
+#           result = getGeoDetails(addresses[[ii]][jj]) 
+#           print(result$status)     
+#           result$index <- jj
+#           #append the answer to the results file.
+#           geocoded[[ii]] <- rbind(geocoded[[ii]], result)
+#           #save temporary results as we are going along
+#           saveRDS(geocoded[[ii]], tempfilename[ii])
+#        } 
+#    }
+#}
+# 
 
 
 # We now have the miss

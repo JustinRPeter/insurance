@@ -12,13 +12,23 @@ library(ggmap)
 #indir    <- '/home/jpeter/justinp/rfiles/suncorp/data/insurance/'
 #infile   <- 'Claim_home.csv'
 indir    <- '/home/jpeter/justinp/rfiles/suncorp/data/insurance2/'
-infile   <- ''
+infile   <- 'HOME_200809.csv'
 data <- read.csv(paste0(indir,infile),header=TRUE)
 
+ext <- which( (data$Incurred.To.Date > 10) &
+              (is.na(data$Latitude)  | 
+               is.na(data$Longitude) |
+                data$Latitude == 0 |
+                data$Longitude == 0) )
+
+    #sub_ins_data[[i]] <- ins_data[[i]][ext[[i]],]
+data <- data[ext,]
+
+# addresses <- paste0(data$Address, ", ",data$Postcode, ", ",
+#                         data$State.Of.Risk, ", Australia")
 # Get the adresses and append "Australia" to the end to increase
 # accuracy
-addresses <- paste0(data$Addresses,", ",data$PostCode)
-#addresses <- data$Address
+addresses <- paste0(data$Address,", ",data$Postcode)
 addresses <- paste0(addresses, ', Queensland, Australia')
 
 # Define a function that will process Google server responses
@@ -86,8 +96,12 @@ for (ii in seq(startindex, length(addresses))){
    geocoded <- rbind(geocoded, result)
    #save temporary results as we are going along
    saveRDS(geocoded, tempfilename)
+   # Remove the tempfile if no longer needed
+   if (length(geocoded$formatted_address) >= length(addresses)){unlink(tempfilename)}
+
 }
  
+
 #now we add the latitude and longitude to the main data
 data$lat <- geocoded$lat
 data$long <- geocoded$long
@@ -95,6 +109,6 @@ data$accuracy <- geocoded$accuracy
  
 #finally write it all to the output files
 #saveRDS(data, paste0("../data/", infile ,"_geocoded.rds"))
-saveRDS(data, paste0("../data/insurance/", infile ,"_geocoded.rds"))
-write.table(data, file=paste0("../data/", infile ,"_geocoded.csv"), sep=",",
+saveRDS(data, paste0("../data/insurance2/", infile ,"_geocoded.rds"))
+write.table(data, file=paste0("../data/insurance2/", infile ,"_geocoded.csv"), sep=",",
 row.names=FALSE)
